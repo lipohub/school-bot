@@ -4,7 +4,7 @@ import os
 from telebot import types
 from datetime import datetime
 
-BOT_TOKEN = '8483130885:AAFAA0VrKGnDjXZNGAPl66pAqvfe_weHWWU'
+BOT_TOKEN = '8483130885:AAEBgryQXbUnNUuS22ZJeUdQVOo4Jua6Vx0'
 ADMIN_IDS = [1967855685]  # ← твои ID и ID других админов (список)
 
 bot = telebot.TeleBot(BOT_TOKEN)
