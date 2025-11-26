@@ -3,6 +3,8 @@ import json
 import os
 from telebot import types
 from datetime import datetime
+import hashlib  # Для генерации уникальных ключей, если нужно
+import base64   # Для кодирования query в пагинации поиска
 
 # ========================= НАСТРОЙКИ =========================
 BOT_TOKEN = '8483130885:AAEBgryQXbUnNUuS22ZJeUdQVOo4Jua6Vx0'          # ← замени
@@ -27,6 +29,11 @@ db = load_db()
 def is_admin(uid):
     return uid in ADMIN_IDS
 
+# Функция для генерации уникального ключа на основе full_name и class (если uid не известен)
+def generate_key(full_name, class_name):
+    hash_input = f"{full_name.lower()}_{class_name.lower()}"
+    return hashlib.md5(hash_input.encode()).hexdigest()
+
 # ========================= ГЛАВНОЕ МЕНЮ =========================
 def main_menu():
     kb = types.InlineKeyboardMarkup(row_width=1)
@@ -48,25 +55,81 @@ def search_start(call):
     bot.register_next_step_handler(msg, process_search)
 
 def process_search(message):
-    query = message.text.lower()
+    query = message.text.lower().strip()
+    if not query:
+        bot.send_message(message.chat.id, "Запрос пустой 😔", reply_markup=main_menu())
+        return
+
     results = []
     for uid, data in db.items():
         if not data.get('approved', False):
             continue
-        if query in data['full_name'].lower() or query in data.get('class', ''):
+        if query in data['full_name'].lower() or query in data.get('class', '').lower():
             results.append((uid, data))
 
     if not results:
         bot.send_message(message.chat.id, "Ничего не нашёл 😔", reply_markup=main_menu())
         return
 
+    results = sorted(results, key=lambda x: x[1]['full_name'])
+
+    per_page = 10
+    total_pages = (len(results) + per_page - 1) // per_page
+
+    show_search_page(message.chat.id, query, 1, results, total_pages, message_id=None)
+
+def show_search_page(chat_id, query, page, results, total_pages, message_id=None):
+    per_page = 10
+    start = (page - 1) * per_page
+    end = start + per_page
+    current_results = results[start:end]
+
     kb = types.InlineKeyboardMarkup(row_width=1)
-    for uid, data in results[:20]:  # максимум 20 результатов
+    for uid, data in current_results:
         kb.add(types.InlineKeyboardButton(
             f"{data['full_name']} • {data['class']}",
             callback_data=f"profile_{uid}"
         ))
-    bot.send_message(message.chat.id, "Выбери человека:", reply_markup=kb)
+
+    row = []
+    encoded_query = base64.b64encode(query.encode()).decode('utf-8')
+    if page > 1:
+        row.append(types.InlineKeyboardButton("◀️ Prev", callback_data=f"search_page_{encoded_query}_{page-1}"))
+    if page < total_pages:
+        row.append(types.InlineKeyboardButton("Next ▶️", callback_data=f"search_page_{encoded_query}_{page+1}"))
+    if row:
+        kb.row(*row)
+
+    text = f"Выбери человека для '{query}' (страница {page}/{total_pages}):"
+
+    if message_id:
+        bot.edit_message_text(text, chat_id, message_id, reply_markup=kb)
+    else:
+        bot.send_message(chat_id, text, reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('search_page_'))
+def handle_search_page(call):
+    parts = call.data.split('_')
+    encoded_query = parts[2]
+    page = int(parts[3])
+    query = base64.b64decode(encoded_query).decode('utf-8')
+
+    results = []
+    for uid, data in db.items():
+        if not data.get('approved', False):
+            continue
+        if query in data['full_name'].lower() or query in data.get('class', '').lower():
+            results.append((uid, data))
+
+    results = sorted(results, key=lambda x: x[1]['full_name'])
+
+    total_pages = (len(results) + 10 - 1) // 10
+
+    if page < 1 or page > total_pages:
+        bot.answer_callback_query(call.id, "Неверная страница")
+        return
+
+    show_search_page(call.message.chat.id, query, page, results, total_pages, call.message.message_id)
 
 # ========================= ПРОФИЛЬ =========================
 @bot.callback_query_handler(func=lambda c: c.data.startswith('profile_'))
@@ -77,7 +140,7 @@ def show_profile(call):
     global db
     db = load_db()
     data = db.get(uid, {})
-    if not data.get('approved'):
+    if not data or not data.get('approved'):
         bot.answer_callback_query(call.id, "Информация ещё не проверена")
         return
 
@@ -109,12 +172,14 @@ def add_tip_start(call):
     msg = bot.send_message(call.message.chat.id,
         "Напиши одним сообщением всё, что знаешь или хочешь исправить.\n"
         "Формат (пример):\n\n"
-        "Иванов Иван\n10А\n15.03.2008\n+79991234567\n@ivanov_tg\nvk.com/ivanov2008\nфутбол, программирование\nОписание: Крутой парень, любит кодинг.")
+        "Иванов Иван\n10А\n15.03.2008\n+79991234567\n@ivanov_tg\nvk.com/ivanov2008\nфутбол, программирование\nОписание: Крутой парень, любит кодинг.\n\n"
+        "Можешь прикрепить фото.")
     
     bot.register_next_step_handler(msg, process_tip, call.from_user.id)
 
 def process_tip(message, user_id):
-    tip_text = message.text.strip()
+    tip_text = message.text.strip() if message.text else ""
+    photo_id = message.photo[-1].file_id if message.photo else None
     
     bot.send_message(message.chat.id, 
         "Спасибо! Я отправил твою наводку админам на проверку.\n"
@@ -132,21 +197,90 @@ def process_tip(message, user_id):
             f"Сообщение ID: {message.message_id}\n\n{tip_text}")
     
     for admin in ADMIN_IDS:
-        bot.send_message(admin, info, reply_markup=kb)
+        if photo_id:
+            bot.send_photo(admin, photo_id, caption=info, reply_markup=kb)
+        else:
+            bot.send_message(admin, info, reply_markup=kb)
+
+def parse_tip(tip_text):
+    lines = tip_text.split('\n')
+    if len(lines) < 2:
+        return None
+    data = {
+        'full_name': lines[0].strip(),
+        'class': lines[1].strip(),
+        'birthday': lines[2].strip() if len(lines) > 2 else '',
+        'phone': lines[3].strip() if len(lines) > 3 else '',
+        'tg': lines[4].strip() if len(lines) > 4 else '',
+        'vk': lines[5].strip() if len(lines) > 5 else '',
+        'interests': lines[6].strip() if len(lines) > 6 else '',
+        'description': '\n'.join(lines[7:]).strip() if len(lines) > 7 else ''
+    }
+    # Базовая валидация
+    if not data['full_name'] or not data['class']:
+        return None
+    return data
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith('approve_tip_') or c.data.startswith('reject_tip_'))
 def handle_tip_approval(call):
     if call.from_user.id not in ADMIN_IDS:
         bot.answer_callback_query(call.id, "Ты не админ")
         return
-    action = "подтверждена" if call.data.startswith('approve_tip') else "отклонена"
-    bot.edit_message_text(f"Наводка {action} админом @{call.from_user.username}", 
-                          call.message.chat.id, call.message.message_id)
+    
+    is_approve = call.data.startswith('approve_tip_')
+    action = "подтверждена" if is_approve else "отклонена"
+    
+    # Извлекаем tip_text из сообщения
+    message_text = call.message.text or call.message.caption
+    parts = message_text.split('\n\n')
+    tip_text = parts[1] if len(parts) > 1 else ""
+    
+    # Фото, если есть
+    photo_id = call.message.photo[-1].file_id if call.message.photo else None
+    
+    if is_approve:
+        parsed_data = parse_tip(tip_text)
+        if not parsed_data:
+            bot.edit_message_text("Ошибка парсинга наводки. Добавьте вручную.", 
+                                  call.message.chat.id, call.message.message_id)
+            return
+        
+        # Ищем существующий профиль по full_name и class
+        existing_uid = None
+        for uid, data in db.items():
+            if data.get('full_name', '').lower() == parsed_data['full_name'].lower() and data.get('class', '').lower() == parsed_data['class'].lower():
+                existing_uid = uid
+                break
+        
+        if existing_uid:
+            # Обновляем существующий
+            db[existing_uid].update(parsed_data)
+            uid = existing_uid
+        else:
+            # Создаем новый с генерированным ключом
+            uid = generate_key(parsed_data['full_name'], parsed_data['class'])
+            db[uid] = parsed_data
+        
+        db[uid]['approved'] = True
+        if photo_id:
+            db[uid]['photo_id'] = photo_id
+        if 'opinions' not in db[uid]:
+            db[uid]['opinions'] = []
+        save_db(db)
+        
+        bot.edit_message_text(f"Наводка {action} админом @{call.from_user.username}. Профиль {'обновлен' if existing_uid else 'добавлен'}.", 
+                              call.message.chat.id, call.message.message_id)
+    else:
+        bot.edit_message_text(f"Наводка {action} админом @{call.from_user.username}", 
+                              call.message.chat.id, call.message.message_id)
 
 # ========================= ДОБАВЛЕНИЕ МНЕНИЯ =========================
 @bot.callback_query_handler(func=lambda c: c.data.startswith('add_opinion_'))
 def add_opinion_start(call):
     uid = call.data.split('_')[2]
+    if uid not in db:
+        bot.answer_callback_query(call.id, "Профиль не найден")
+        return
     msg = bot.send_message(call.message.chat.id, "Напиши своё мнение (до 200 символов):")
     bot.register_next_step_handler(msg, process_opinion, uid, call.from_user.id)
 
@@ -159,8 +293,6 @@ def process_opinion(message, uid, user_id):
     bot.send_message(message.chat.id, "Спасибо! Мнение отправлено на проверку админам.")
 
     # Сохраняем временно в базе с approved=False
-    if uid not in db:
-        db[uid] = {"opinions": []}
     if "opinions" not in db[uid]:
         db[uid]["opinions"] = []
 
@@ -199,6 +331,9 @@ def view_opinions(call):
     global db
     db = load_db()
     data = db.get(uid, {})
+    if not data:
+        bot.answer_callback_query(call.id, "Профиль не найден")
+        return
     opinions = [op for op in data.get('opinions', []) if op.get('approved', False)]
 
     if not opinions:
@@ -236,19 +371,22 @@ def handle_opinion_approval(call):
     uid = parts[2]
     index = int(parts[3])
 
-    if uid in db and index < len(db[uid]["opinions"]):
-        if action == 'approve_op':
-            db[uid]["opinions"][index]["approved"] = True
-            save_db(db)
-            bot.edit_message_text(f"Мнение подтверждено админом @{call.from_user.username}\nТеперь видно всем!", 
-                                  call.message.chat.id, call.message.message_id)
-        else:
-            del db[uid]["opinions"][index]
-            if not db[uid]["opinions"]:
-                del db[uid]["opinions"]
-            save_db(db)
-            bot.edit_message_text(f"Мнение отклонено админом @{call.from_user.username}", 
-                                  call.message.chat.id, call.message.message_id)
+    if uid not in db or index >= len(db[uid].get("opinions", [])):
+        bot.answer_callback_query(call.id, "Мнение не найдено")
+        return
+
+    if action == 'approve':
+        db[uid]["opinions"][index]["approved"] = True
+        save_db(db)
+        bot.edit_message_text(f"Мнение подтверждено админом @{call.from_user.username}\nТеперь видно всем!", 
+                              call.message.chat.id, call.message.message_id)
+    else:
+        del db[uid]["opinions"][index]
+        if not db[uid]["opinions"]:
+            del db[uid]["opinions"]
+        save_db(db)
+        bot.edit_message_text(f"Мнение отклонено админом @{call.from_user.username}", 
+                              call.message.chat.id, call.message.message_id)
 
 # ========================= АДМИН-ПАНЕЛЬ =========================
 @bot.message_handler(commands=['admin'])
@@ -271,25 +409,96 @@ def admin_menu_handler(message):
 
     bot.send_message(message.chat.id, "Админ-меню:", reply_markup=kb)
 
+# ========================= АДМИН: СПИСОК ВСЕХ =========================
+@bot.callback_query_handler(func=lambda c: c.data == 'admin_list')
+def admin_list(call):
+    if not is_admin(call.from_user.id):
+        return
+
+    # Перезагружаем базу
+    global db
+    db = load_db()
+
+    students = sorted(db.items(), key=lambda x: x[1].get('full_name', ''))
+
+    if not students:
+        bot.send_message(call.message.chat.id, "База пуста.")
+        return
+
+    per_page = 20  # Больше, так как текст короткий
+    total_pages = (len(students) + per_page - 1) // per_page
+
+    show_admin_list_page(call.message.chat.id, 1, students, total_pages, message_id=None)
+
+def show_admin_list_page(chat_id, page, students, total_pages, message_id=None):
+    per_page = 20
+    start = (page - 1) * per_page
+    end = start + per_page
+    current_students = students[start:end]
+
+    text = f"Все ученики (страница {page}/{total_pages}):\n\n"
+    for uid, data in current_students:
+        approved = "✅" if data.get('approved', False) else "❌"
+        text += f"{data.get('full_name', 'Без имени')} ({data.get('class', 'Без класса')}) - ID: {uid} {approved}\n"
+
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    if page > 1:
+        kb.add(types.InlineKeyboardButton("◀️ Prev", callback_data=f"admin_list_page_{page-1}"))
+    if page < total_pages:
+        kb.add(types.InlineKeyboardButton("Next ▶️", callback_data=f"admin_list_page_{page+1}"))
+
+    if message_id:
+        bot.edit_message_text(text, chat_id, message_id, reply_markup=kb)
+    else:
+        bot.send_message(chat_id, text, reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('admin_list_page_'))
+def handle_admin_list_page(call):
+    if not is_admin(call.from_user.id):
+        return
+
+    parts = call.data.split('_')
+    page = int(parts[3])
+
+    # Перезагружаем базу
+    global db
+    db = load_db()
+
+    students = sorted(db.items(), key=lambda x: x[1].get('full_name', ''))
+
+    total_pages = (len(students) + 20 - 1) // 20
+
+    if page < 1 or page > total_pages:
+        bot.answer_callback_query(call.id, "Неверная страница")
+        return
+
+    show_admin_list_page(call.message.chat.id, page, students, total_pages, call.message.message_id)
+
 # ========================= АДМИН: ДОБАВИТЬ УЧЕНИКА =========================
 @bot.callback_query_handler(func=lambda c: c.data == 'admin_add')
 def admin_add_start(call):
     if not is_admin(call.from_user.id):
         return
-    msg = bot.send_message(call.message.chat.id, "Введи Telegram ID ученика (число):")
+    msg = bot.send_message(call.message.chat.id, "Введи Telegram ID ученика (число, или пусто для авто-генерации):")
     bot.register_next_step_handler(msg, admin_add_id)
 
 def admin_add_id(message):
-    try:
-        uid = str(int(message.text.strip()))
-        if uid in db:
-            bot.send_message(message.chat.id, "Этот ID уже есть. Используй редактирование.")
+    uid_input = message.text.strip()
+    if uid_input:
+        try:
+            uid = str(int(uid_input))
+        except ValueError:
+            bot.send_message(message.chat.id, "Неверный ID.")
             return
-        db[uid] = {'opinions': []}
-        msg = bot.send_message(message.chat.id, "Введи ФИО:")
-        bot.register_next_step_handler(msg, admin_add_name, uid)
-    except ValueError:
-        bot.send_message(message.chat.id, "Неверный ID.")
+    else:
+        uid = generate_key(str(len(db)), datetime.now().strftime("%Y%m%d"))  # Авто-uid
+    
+    if uid in db:
+        bot.send_message(message.chat.id, "Этот ID уже есть. Используй редактирование.")
+        return
+    db[uid] = {'opinions': []}
+    msg = bot.send_message(message.chat.id, "Введи ФИО:")
+    bot.register_next_step_handler(msg, admin_add_name, uid)
 
 def admin_add_name(message, uid):
     db[uid]['full_name'] = message.text.strip()
@@ -334,7 +543,19 @@ def admin_add_description(message, uid):
     db[uid]['description'] = text
     db[uid]['approved'] = True
     save_db(db)
-    bot.send_message(message.chat.id, f"Добавлен {db[uid]['full_name']}!")
+    msg = bot.send_message(message.chat.id, "Прикрепи фото (или отправь 'нет'):")
+    bot.register_next_step_handler(msg, admin_add_photo, uid)
+
+def admin_add_photo(message, uid):
+    if message.text and message.text.lower() == 'нет':
+        bot.send_message(message.chat.id, f"Добавлен {db[uid]['full_name']}! Без фото.")
+        return
+    if message.photo:
+        db[uid]['photo_id'] = message.photo[-1].file_id
+        save_db(db)
+        bot.send_message(message.chat.id, f"Добавлен {db[uid]['full_name']}! С фото.")
+    else:
+        bot.send_message(message.chat.id, "Отправь фото или 'нет'.")
 
 # ========================= АДМИН: РЕДАКТИРОВАТЬ =========================
 @bot.callback_query_handler(func=lambda c: c.data == 'admin_edit')
@@ -351,7 +572,7 @@ def admin_edit_start(call):
 def admin_edit_select(call):
     uid = call.data.split('_')[2]
     kb = types.InlineKeyboardMarkup(row_width=2)
-    fields = ['full_name', 'class', 'birthday', 'phone', 'tg', 'vk', 'interests', 'description']
+    fields = ['full_name', 'class', 'birthday', 'phone', 'tg', 'vk', 'interests', 'description', 'photo_id']
     for field in fields:
         kb.add(types.InlineKeyboardButton(field.capitalize(), callback_data=f"edit_field_{uid}_{field}"))
     bot.edit_message_text(f"Поле для редактирования у {db[uid]['full_name']}:", call.message.chat.id, call.message.message_id, reply_markup=kb)
@@ -361,8 +582,12 @@ def admin_edit_field(call):
     parts = call.data.split('_')
     uid = parts[2]
     field = parts[3]
-    msg = bot.send_message(call.message.chat.id, f"Новое значение для {field} (текущее: {db[uid].get(field, 'пусто')}):")
-    bot.register_next_step_handler(msg, admin_edit_save, uid, field)
+    if field == 'photo_id':
+        msg = bot.send_message(call.message.chat.id, "Прикрепи новое фото (или 'нет' для удаления):")
+        bot.register_next_step_handler(msg, admin_edit_photo, uid)
+    else:
+        msg = bot.send_message(call.message.chat.id, f"Новое значение для {field} (текущее: {db[uid].get(field, 'пусто')}):")
+        bot.register_next_step_handler(msg, admin_edit_save, uid, field)
 
 def admin_edit_save(message, uid, field):
     text = message.text.strip()
@@ -372,6 +597,20 @@ def admin_edit_save(message, uid, field):
     db[uid][field] = text
     save_db(db)
     bot.send_message(message.chat.id, f"Обновлено {field} для {db[uid]['full_name']}.")
+
+def admin_edit_photo(message, uid):
+    if message.text and message.text.lower() == 'нет':
+        if 'photo_id' in db[uid]:
+            del db[uid]['photo_id']
+        save_db(db)
+        bot.send_message(message.chat.id, "Фото удалено.")
+        return
+    if message.photo:
+        db[uid]['photo_id'] = message.photo[-1].file_id
+        save_db(db)
+        bot.send_message(message.chat.id, "Фото обновлено.")
+    else:
+        bot.send_message(message.chat.id, "Отправь фото или 'нет'.")
 
 # ========================= АДМИН: УДАЛИТЬ =========================
 @bot.callback_query_handler(func=lambda c: c.data == 'admin_delete')
@@ -400,16 +639,6 @@ def admin_delete_yes(call):
     del db[uid]
     save_db(db)
     bot.edit_message_text("Удалено.", call.message.chat.id, call.message.message_id)
-
-# ========================= АДМИН: СПИСОК ВСЕХ =========================
-@bot.callback_query_handler(func=lambda c: c.data == 'admin_list')
-def admin_list(call):
-    if not is_admin(call.from_user.id):
-        return
-    text = "Все ученики:\n\n"
-    for uid, data in db.items():
-        text += f"{data['full_name']} ({data['class']}) - ID: {uid}\n"
-    bot.send_message(call.message.chat.id, text or "База пуста.")
 
 # ========================= АДМИН: ЭКСПОРТ БАЗЫ =========================
 @bot.callback_query_handler(func=lambda c: c.data == 'admin_export')
@@ -516,11 +745,16 @@ def cancel(call):
 def get_students_kb(prefix):
     kb = types.InlineKeyboardMarkup(row_width=1)
     for uid, data in sorted(db.items(), key=lambda x: x[1]['full_name']):
-        kb.add(types.InlineKeyboardButton(
-            f"{data['full_name']} • {data['class']}",
-            callback_data=f"{prefix}{uid}"
-        ))
+        if data.get('approved', False):  # Показываем только approved
+            kb.add(types.InlineKeyboardButton(
+                f"{data['full_name']} • {data['class']}",
+                callback_data=f"{prefix}{uid}"
+            ))
     return kb
 
 # ========================= ЗАПУСК =========================
-bot.infinity_polling()
+if __name__ == '__main__':
+    try:
+        bot.infinity_polling()
+    except Exception as e:
+        print(f"Error: {e}")
