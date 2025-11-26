@@ -72,6 +72,10 @@ def process_search(message):
 @bot.callback_query_handler(func=lambda c: c.data.startswith('profile_'))
 def show_profile(call):
     uid = call.data.split('_')[1]
+
+    # Перезагружаем базу, чтобы видеть свежие изменения (мнения и т.д.)
+    global db
+    db = load_db()
     data = db.get(uid, {})
     if not data.get('approved'):
         bot.answer_callback_query(call.id, "Информация ещё не проверена")
@@ -88,15 +92,11 @@ def show_profile(call):
     if data.get('description'): text += f"\nОписание: {data['description']}\n"
 
     kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(types.InlineKeyboardButton("Добавить мнение", callback_data=f"add_opinion_{uid}"))
-
-    # ← ЭТА СТРОКА ВСЁ ИСПРАВИЛА! Перечитываем актуальную базу
-    db = load_db()
-    data = db.get(uid, {})
-
+    kb.add(types.InlineKeyboardButton("🔙 Назад", callback_data="search"))
+    kb.add(types.InlineKeyboardButton("📝 Добавить мнение", callback_data=f"add_opinion_{uid}"))
     opinions = [op for op in data.get('opinions', []) if op.get('approved')]
     if opinions:
-        kb.add(types.InlineKeyboardButton(f"Мнения ({len(opinions)})", callback_data=f"view_opinions_{uid}_1"))
+        kb.add(types.InlineKeyboardButton(f"💬 Мнения ({len(opinions)})", callback_data=f"view_opinions_{uid}_1"))
 
     if data.get('photo_id'):
         bot.send_photo(call.message.chat.id, data['photo_id'], caption=text, parse_mode='Markdown', reply_markup=kb)
@@ -194,6 +194,10 @@ def view_opinions(call):
     parts = call.data.split('_')
     uid = parts[2]
     page = int(parts[3])
+
+    # Перезагружаем базу, чтобы видеть свежие изменения
+    global db
+    db = load_db()
     data = db.get(uid, {})
     opinions = [op for op in data.get('opinions', []) if op.get('approved', False)]
 
