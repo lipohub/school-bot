@@ -88,11 +88,15 @@ def show_profile(call):
     if data.get('description'): text += f"\nОписание: {data['description']}\n"
 
     kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(types.InlineKeyboardButton("🔙 Назад", callback_data="search"))
-    kb.add(types.InlineKeyboardButton("📝 Добавить мнение", callback_data=f"add_opinion_{uid}"))
+    kb.add(types.InlineKeyboardButton("Добавить мнение", callback_data=f"add_opinion_{uid}"))
+
+    # ← ЭТА СТРОКА ВСЁ ИСПРАВИЛА! Перечитываем актуальную базу
+    db = load_db()
+    data = db.get(uid, {})
+
     opinions = [op for op in data.get('opinions', []) if op.get('approved')]
     if opinions:
-        kb.add(types.InlineKeyboardButton(f"💬 Мнения ({len(opinions)})", callback_data=f"view_opinions_{uid}_1"))
+        kb.add(types.InlineKeyboardButton(f"Мнения ({len(opinions)})", callback_data=f"view_opinions_{uid}_1"))
 
     if data.get('photo_id'):
         bot.send_photo(call.message.chat.id, data['photo_id'], caption=text, parse_mode='Markdown', reply_markup=kb)
