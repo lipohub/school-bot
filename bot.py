@@ -118,10 +118,18 @@ def process_tip(message, user_id):
         "Как только проверят — информация появится в поиске.", 
         reply_markup=main_menu())
 
-    # Пересылаем админам с данными отправителя
-    info = f"Новая наводка от @{message.from_user.username} ({message.from_user.id})\n\n{tip_text}"
+    # === НОВОЕ: сообщение админам с кнопками ===
+    kb = types.InlineKeyboardMarkup()
+    kb.add(
+        types.InlineKeyboardButton("Подтвердить наводку", callback_data=f"approve_tip_{message.message_id}"),
+        types.InlineKeyboardButton("Отклонить", callback_data=f"reject_tip_{message.message_id}")
+    )
+    
+    info = (f"Новая наводка от @{message.from_user.username} ({message.from_user.id})\n"
+            f"Сообщение ID: {message.message_id}\n\n{tip_text}")
+    
     for admin in ADMIN_IDS:
-        bot.send_message(admin, info)
+        bot.send_message(admin, info, reply_markup=kb)
 
 # === Добавление мнения ===
 @bot.callback_query_handler(func=lambda c: c.data.startswith('add_opinion_'))
@@ -138,10 +146,19 @@ def process_opinion(message, uid, user_id):
 
     bot.send_message(message.chat.id, "Спасибо! Мнение отправлено на проверку админам.")
 
-    # Пересылаем админам с данными отправителя
-    info = f"Новое мнение о {db[uid]['full_name']} от @{message.from_user.username} ({message.from_user.id})\n\n{text}"
+    # === НОВОЕ: сообщение админам с кнопками ===
+    kb = types.InlineKeyboardMarkup()
+    kb.add(
+        types.InlineKeyboardButton("Подтвердить мнение", callback_data=f"approve_op_{uid}_{message.message_id}"),
+        types.InlineKeyboardButton("Отклонить", callback_data=f"reject_op_{uid}_{message.message_id}")
+    )
+    
+    info = (f"Новое мнение о {db[uid]['full_name']} (ID {uid})\n"
+            f"От: @{message.from_user.username} ({message.from_user.id})\n"
+            f"Сообщение ID: {message.message_id}\n\n{text}")
+    
     for admin in ADMIN_IDS:
-        bot.send_message(admin, info)
+        bot.send_message(admin, info, reply_markup=kb)
 
 # === Просмотр мнений с пагинацией ===
 @bot.callback_query_handler(func=lambda c: c.data.startswith('view_opinions_'))
@@ -449,6 +466,25 @@ def get_students_kb(prefix):
             callback_data=f"{prefix}{uid}"
         ))
     return kb
+
+# === Обработка кнопок подтверждения/отклонения ===
+@bot.callback_query_handler(func=lambda c: c.data.startswith('approve_tip_') or c.data.startswith('reject_tip_'))
+def handle_tip_approval(call):
+    if call.from_user.id not in ADMIN_IDS:
+        bot.answer_callback_query(call.id, "Ты не админ")
+        return
+    action = "подтверждена" if call.data.startswith('approve_tip') else "отклонена"
+    bot.edit_message_text(f"Наводка {action} админом @{call.from_user.username}", 
+                          call.message.chat.id, call.message.message_id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith('approve_op_') or c.data.startswith('reject_op_'))
+def handle_opinion_approval(call):
+    if call.from_user.id not in ADMIN_IDS:
+        bot.answer_callback_query(call.id, "Ты не админ")
+        return
+    action = "подтверждено" if call.data.startswith('approve_op') else "отклонено"
+    bot.edit_message_text(f"Мнение {action} админом @{call.from_user.username}", 
+                          call.message.chat.id, call.message.message_id)
 
 # === Запуск ===
 bot.infinity_polling()
