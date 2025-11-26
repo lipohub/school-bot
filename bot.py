@@ -45,10 +45,31 @@ def main_menu():
 def start(message):
     bot.send_message(message.chat.id,
         "Привет! Это поисковик учеников нашей школы\n\n"
-        "Тут можно найти инфу о человеке или оставить заявку на добавление/исправление данных.",
+        "Тут можно найти инфу о человеке или оставить заявку на добавление/исправление данных.\n\n"
+        "Доступные команды:\n"
+        "/start - Главное меню\n"
+        "/search - Поиск ученика\n"
+        "/add_tip - Дать наводку\n"
+        "/admin - Админ-панель (только для админов)\n"
+        "/help - Список команд",
         reply_markup=main_menu())
 
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    bot.send_message(message.chat.id,
+        "Доступные команды:\n"
+        "/start - Главное меню\n"
+        "/search - Поиск ученика\n"
+        "/add_tip - Дать наводку\n"
+        "/admin - Админ-панель (только для админов)\n"
+        "/help - Этот список")
+
 # ========================= ПОИСК =========================
+@bot.message_handler(commands=['search'])
+def search_command(message):
+    msg = bot.send_message(message.chat.id, "Напиши фамилию или имя ученика:")
+    bot.register_next_step_handler(msg, process_search)
+
 @bot.callback_query_handler(func=lambda c: c.data == 'search')
 def search_start(call):
     msg = bot.send_message(call.message.chat.id, "Напиши фамилию или имя ученика:")
@@ -167,6 +188,16 @@ def show_profile(call):
         bot.send_message(call.message.chat.id, text, parse_mode='Markdown', reply_markup=kb)
 
 # ========================= НАВОДКИ =========================
+@bot.message_handler(commands=['add_tip'])
+def add_tip_command(message):
+    msg = bot.send_message(message.chat.id,
+        "Напиши одним сообщением всё, что знаешь или хочешь исправить.\n"
+        "Формат (пример):\n\n"
+        "Иванов Иван\n10А\n15.03.2008\n+79991234567\n@ivanov_tg\nvk.com/ivanov2008\nфутбол, программирование\nОписание: Крутой парень, любит кодинг.\n\n"
+        "Можешь прикрепить фото.")
+    
+    bot.register_next_step_handler(msg, process_tip, message.from_user.id)
+
 @bot.callback_query_handler(func=lambda c: c.data == 'add_tip')
 def add_tip_start(call):
     msg = bot.send_message(call.message.chat.id,
@@ -288,6 +319,8 @@ def process_opinion(message, uid, user_id):
     text = message.text.strip()
     if len(text) > 200:
         bot.send_message(message.chat.id, "Слишком длинно! Максимум 200 символов.")
+        msg = bot.send_message(message.chat.id, "Напиши своё мнение заново (до 200 символов):")
+        bot.register_next_step_handler(msg, process_opinion, uid, user_id)
         return
 
     bot.send_message(message.chat.id, "Спасибо! Мнение отправлено на проверку админам.")
@@ -488,7 +521,9 @@ def admin_add_id(message):
         try:
             uid = str(int(uid_input))
         except ValueError:
-            bot.send_message(message.chat.id, "Неверный ID.")
+            bot.send_message(message.chat.id, "Неверный ID. Попробуй заново.")
+            msg = bot.send_message(message.chat.id, "Введи Telegram ID ученика (число, или пусто для авто-генерации):")
+            bot.register_next_step_handler(msg, admin_add_id)
             return
     else:
         uid = generate_key(str(len(db)), datetime.now().strftime("%Y%m%d"))  # Авто-uid
@@ -501,17 +536,31 @@ def admin_add_id(message):
     bot.register_next_step_handler(msg, admin_add_name, uid)
 
 def admin_add_name(message, uid):
-    db[uid]['full_name'] = message.text.strip()
+    text = message.text.strip()
+    if not text:
+        bot.send_message(message.chat.id, "ФИО не может быть пустым. Попробуй заново.")
+        msg = bot.send_message(message.chat.id, "Введи ФИО:")
+        bot.register_next_step_handler(msg, admin_add_name, uid)
+        return
+    db[uid]['full_name'] = text
     msg = bot.send_message(message.chat.id, "Введи класс (10А):")
     bot.register_next_step_handler(msg, admin_add_class, uid)
 
 def admin_add_class(message, uid):
-    db[uid]['class'] = message.text.strip()
+    text = message.text.strip()
+    if not text:
+        bot.send_message(message.chat.id, "Класс не может быть пустым. Попробуй заново.")
+        msg = bot.send_message(message.chat.id, "Введи класс (10А):")
+        bot.register_next_step_handler(msg, admin_add_class, uid)
+        return
+    db[uid]['class'] = text
     msg = bot.send_message(message.chat.id, "Введи ДР (15.03.2008):")
     bot.register_next_step_handler(msg, admin_add_birthday, uid)
 
 def admin_add_birthday(message, uid):
-    db[uid]['birthday'] = message.text.strip()
+    text = message.text.strip()
+    # Можно добавить валидацию формата даты, но для простоты пропустим
+    db[uid]['birthday'] = text
     msg = bot.send_message(message.chat.id, "Введи телефон (или пусто):")
     bot.register_next_step_handler(msg, admin_add_phone, uid)
 
@@ -538,7 +587,9 @@ def admin_add_interests(message, uid):
 def admin_add_description(message, uid):
     text = message.text.strip()
     if len(text) > 500:
-        bot.send_message(message.chat.id, "Слишком длинно!")
+        bot.send_message(message.chat.id, "Слишком длинно! Попробуй заново.")
+        msg = bot.send_message(message.chat.id, "Введи описание (до 500 симв., или пусто):")
+        bot.register_next_step_handler(msg, admin_add_description, uid)
         return
     db[uid]['description'] = text
     db[uid]['approved'] = True
@@ -556,6 +607,8 @@ def admin_add_photo(message, uid):
         bot.send_message(message.chat.id, f"Добавлен {db[uid]['full_name']}! С фото.")
     else:
         bot.send_message(message.chat.id, "Отправь фото или 'нет'.")
+        msg = bot.send_message(message.chat.id, "Прикрепи фото (или отправь 'нет'):")
+        bot.register_next_step_handler(msg, admin_add_photo, uid)
 
 # ========================= АДМИН: РЕДАКТИРОВАТЬ =========================
 @bot.callback_query_handler(func=lambda c: c.data == 'admin_edit')
@@ -592,7 +645,14 @@ def admin_edit_field(call):
 def admin_edit_save(message, uid, field):
     text = message.text.strip()
     if field == 'description' and len(text) > 500:
-        bot.send_message(message.chat.id, "Слишком длинно!")
+        bot.send_message(message.chat.id, "Слишком длинно! Попробуй заново.")
+        msg = bot.send_message(message.chat.id, f"Новое значение для {field} (текущее: {db[uid].get(field, 'пусто')}):")
+        bot.register_next_step_handler(msg, admin_edit_save, uid, field)
+        return
+    if (field == 'full_name' or field == 'class') and not text:
+        bot.send_message(message.chat.id, f"{field.capitalize()} не может быть пустым. Попробуй заново.")
+        msg = bot.send_message(message.chat.id, f"Новое значение для {field} (текущее: {db[uid].get(field, 'пусто')}):")
+        bot.register_next_step_handler(msg, admin_edit_save, uid, field)
         return
     db[uid][field] = text
     save_db(db)
@@ -611,6 +671,8 @@ def admin_edit_photo(message, uid):
         bot.send_message(message.chat.id, "Фото обновлено.")
     else:
         bot.send_message(message.chat.id, "Отправь фото или 'нет'.")
+        msg = bot.send_message(message.chat.id, "Прикрепи новое фото (или 'нет' для удаления):")
+        bot.register_next_step_handler(msg, admin_edit_photo, uid)
 
 # ========================= АДМИН: УДАЛИТЬ =========================
 @bot.callback_query_handler(func=lambda c: c.data == 'admin_delete')
@@ -685,13 +747,20 @@ def admin_add_opinion_start(call):
 def admin_add_opinion_text(message, uid):
     text = message.text.strip()
     if len(text) > 200:
-        bot.send_message(message.chat.id, "Слишком длинно!")
+        bot.send_message(message.chat.id, "Слишком длинно! Попробуй заново.")
+        msg = bot.send_message(message.chat.id, "Введи текст мнения (до 200 симв.):")
+        bot.register_next_step_handler(msg, admin_add_opinion_text, uid)
         return
     msg = bot.send_message(message.chat.id, "Введи ID автора:")
     bot.register_next_step_handler(msg, admin_add_opinion_author_id, uid, text)
 
 def admin_add_opinion_author_id(message, uid, text):
     author_id = message.text.strip()
+    if not author_id.isdigit():
+        bot.send_message(message.chat.id, "ID должен быть числом. Попробуй заново.")
+        msg = bot.send_message(message.chat.id, "Введи ID автора:")
+        bot.register_next_step_handler(msg, admin_add_opinion_author_id, uid, text)
+        return
     msg = bot.send_message(message.chat.id, "Введи username автора (@username):")
     bot.register_next_step_handler(msg, admin_add_opinion_author_username, uid, text, author_id)
 
