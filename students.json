@@ -1,0 +1,15 @@
+{
+  "111111111": {
+    "full_name": "Тест Тестов",
+    "class": "10А",
+    "birthday": "01.01.2009",
+    "phone": "",
+    "tg": "@test",
+    "vk": "",
+    "interests": "",
+    "description": "",
+    "photo_id": "",
+    "approved": true,
+    "opinions": []
+  }
+}
