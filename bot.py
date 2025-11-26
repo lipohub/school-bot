@@ -141,22 +141,38 @@ def add_opinion_start(call):
 def process_opinion(message, uid, user_id):
     text = message.text.strip()
     if len(text) > 200:
-        bot.send_message(message.chat.id, "Слишком длинно! Максимум 200 символов.")
+        bot.send_message(message.chat.id, "Ошибка: мнение не больше 200 символов!")
         return
 
-    bot.send_message(message.chat.id, "Спасибо! Мнение отправлено на проверку админам.")
+    bot.send_message(message.chat.id, "Спасибо! Мнение отправлено на модерацию.")
 
-    # === НОВОЕ: сообщение админам с кнопками ===
+    # Сохраняем временно в базе с approved=False
+    if uid not in db:
+        db[uid] = {"opinions": [], "approved": False}
+    if "opinions" not in db[uid]:
+        db[uid]["opinions"] = []
+
+    opinion = {
+        "text": text,
+        "author_id": str(message.from_user.id),
+        "author_username": message.from_user.username or "Без_юзернейма",
+        "date": datetime.now().strftime("%d.%m.%Y"),
+        "approved": False  # пока не одобрено
+    }
+    db[uid]["opinions"].append(opinion)
+    save_db(db)
+
+    # Сообщение админам с кнопками
     kb = types.InlineKeyboardMarkup()
     kb.add(
-        types.InlineKeyboardButton("Подтвердить мнение", callback_data=f"approve_op_{uid}_{message.message_id}"),
-        types.InlineKeyboardButton("Отклонить", callback_data=f"reject_op_{uid}_{message.message_id}")
+        types.InlineKeyboardButton("Подтвердить", callback_data=f"approve_op_{uid}_{len(db[uid]['opinions'])-1}"),
+        types.InlineKeyboardButton("Отклонить", callback_data=f"reject_op_{uid}_{len(db[uid]['opinions'])-1}")
     )
-    
-    info = (f"Новое мнение о {db[uid]['full_name']} (ID {uid})\n"
-            f"От: @{message.from_user.username} ({message.from_user.id})\n"
-            f"Сообщение ID: {message.message_id}\n\n{text}")
-    
+
+    info = (f"Новое мнение о {db[uid].get('full_name', 'ID '+uid)}\n"
+            f"От: @{message.from_user.username or 'без_юзернейма'} ({message.from_user.id})\n\n"
+            f"{text}")
+
     for admin in ADMIN_IDS:
         bot.send_message(admin, info, reply_markup=kb)
 
@@ -482,9 +498,33 @@ def handle_opinion_approval(call):
     if call.from_user.id not in ADMIN_IDS:
         bot.answer_callback_query(call.id, "Ты не админ")
         return
-    action = "подтверждено" if call.data.startswith('approve_op') else "отклонено"
-    bot.edit_message_text(f"Мнение {action} админом @{call.from_user.username}", 
-                          call.message.chat.id, call.message.message_id)
+
+    parts = call.data.split('_')
+    action = parts[0]  # approve_op или reject_op
+    uid = parts[2]
+    index = int(parts[3])
+
+    if action == "approve":
+        if uid in db and index < len(db[uid]["opinions"]):
+            db[uid]["opinions"][index]["approved"] = True
+            save_db(db)
+        bot.edit_message_text(
+            f"Мнение подтверждено админом @{call.from_user.username}\n"
+            f"Теперь видно всем!", 
+            call.message.chat.id, call.message.message_id
+        )
+    else:
+        # При отклонении — просто удаляем из базы
+        if uid in db and index < len(db[uid]["opinions"]):
+            removed_text = db[uid]["opinions"][index]["text"][:50]
+            del db[uid]["opinions"][index]
+            if not db[uid]["opinions"]:
+                db[uid].pop("opinions", None)
+            save_db(db)
+        bot.edit_message_text(
+            f"Мнение отклонено и удалено админом @{call.from_user.username}", 
+            call.message.chat.id, call.message.message_id
+        )
 
 # === Запуск ===
 bot.infinity_polling()
