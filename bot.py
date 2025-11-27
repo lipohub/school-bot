@@ -460,42 +460,8 @@ def admin_menu_handler(message):
     )
     kb.add(types.InlineKeyboardButton("📤 Экспорт базы", callback_data="admin_export"))
     kb.add(types.InlineKeyboardButton("💬 Управление мнениями", callback_data="admin_opinions"))
-    kb.add(types.InlineKeyboardButton("📥 Импорт базы", callback_data="admin_import"))
 
     bot.send_message(message.chat.id, "Админ-меню:", reply_markup=kb)
-
-# ========================= АДМИН: ИМПОРТ БАЗЫ =========================
-@bot.callback_query_handler(func=lambda c: c.data == 'admin_import')
-def admin_import_start(call):
-    if not is_admin(call.from_user.id):
-        return
-    msg = bot.send_message(call.message.chat.id, "Отправь JSON-файл для импорта (students.json):")
-    bot.register_next_step_handler(msg, admin_import_json)
-
-def admin_import_json(message):
-    if not message.document:
-        bot.send_message(message.chat.id, "Отправь файл в формате JSON.")
-        return
-
-    file_info = bot.get_file(message.document.file_id)
-    downloaded_file = bot.download_file(file_info.file_path)
-    
-    try:
-        imported_data = json.loads(downloaded_file)
-        # Проверяем структуру
-        if not isinstance(imported_data, dict):
-            raise ValueError("Неверный формат JSON.")
-        
-        # Импортируем, перезаписывая существующие или добавляя новые
-        for uid, data in imported_data.items():
-            if uid in db:
-                db[uid].update(data)
-            else:
-                db[uid] = data
-        save_db(db)
-        bot.send_message(message.chat.id, f"База импортирована успешно! Добавлено/обновлено {len(imported_data)} записей.")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка импорта: {e}")
 
 # ========================= АДМИН: СПИСОК ВСЕХ =========================
 @bot.callback_query_handler(func=lambda c: c.data == 'admin_list')
