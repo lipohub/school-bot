@@ -5,24 +5,26 @@ from telebot import types
 from datetime import datetime
 import hashlib  # Для генерации уникальных ключей, если нужно
 import base64   # Для кодирования query в пагинации поиска
+import pymongo
 
 # ========================= НАСТРОЙКИ =========================
 BOT_TOKEN = '8483130885:AAEBgryQXbUnNUuS22ZJeUdQVOo4Jua6Vx0'          # ← замени
 ADMIN_IDS = [1967855685]                   # ← твои Telegram ID (можно несколько через запятую)
+MONGO_URI = os.getenv('mongodb+srv://Botuser:<kirkram43211020K!>@cluster0.xwuatb1.mongodb.net/?appName=Cluster0')         # Установи в переменных окружения
+
+client = pymongo.MongoClient(MONGO_URI)
+mongo_db = client['telegram_bot_db']       # Название твоей базы данных
+collection = mongo_db['students']          # Коллекция для хранения данных
 
 bot = telebot.TeleBot(BOT_TOKEN)
-DB_FILE = 'students.json'
 
 # ========================= БАЗА ДАННЫХ =========================
 def load_db():
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {}
+    doc = collection.find_one({'_id': 'students'})
+    return doc['data'] if doc else {}
 
-def save_db(db):
-    with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
+def save_db(db_data):
+    collection.update_one({'_id': 'students'}, {'$set': {'data': db_data}}, upsert=True)
 
 db = load_db()
 
@@ -522,14 +524,14 @@ def admin_add_name(message):
         msg = bot.send_message(message.chat.id, "Введи ФИО:")
         bot.register_next_step_handler(msg, admin_add_name)
         return
-    msg = bot.send_message(message.chat.id, "Введи класс:")
+    msg = bot.send_message(message.chat.id, "Введи класс (10А):")
     bot.register_next_step_handler(msg, admin_add_class, full_name)
 
 def admin_add_class(message, full_name):
     class_name = message.text.strip()
     if not class_name:
         bot.send_message(message.chat.id, "Класс не может быть пустым. Попробуй заново.")
-        msg = bot.send_message(message.chat.id, "Введи класс:")
+        msg = bot.send_message(message.chat.id, "Введи класс (10А):")
         bot.register_next_step_handler(msg, admin_add_class, full_name)
         return
     uid = generate_key(full_name, class_name)
@@ -541,7 +543,7 @@ def admin_add_class(message, full_name):
         'class': class_name,
         'opinions': []
     }
-    msg = bot.send_message(message.chat.id, "Введи ДР:")
+    msg = bot.send_message(message.chat.id, "Введи ДР (15.03.2008):")
     bot.register_next_step_handler(msg, admin_add_birthday, uid)
 
 def admin_add_birthday(message, uid):
@@ -703,8 +705,13 @@ def admin_delete_yes(call):
 def admin_export(call):
     if not is_admin(call.from_user.id):
         return
-    with open(DB_FILE, 'rb') as f:
+    # Экспорт из MongoDB в JSON
+    db_data = load_db()
+    with open('temp_students.json', 'w', encoding='utf-8') as f:
+        json.dump(db_data, f, ensure_ascii=False, indent=2)
+    with open('temp_students.json', 'rb') as f:
         bot.send_document(call.message.chat.id, f)
+    os.remove('temp_students.json')
 
 # ========================= АДМИН: УПРАВЛЕНИЕ МНЕНИЯМИ =========================
 @bot.callback_query_handler(func=lambda c: c.data == 'admin_opinions')
