@@ -29,7 +29,7 @@ db = load_db()
 def is_admin(uid):
     return uid in ADMIN_IDS
 
-# Функция для генерации уникального ключа на основе full_name и class (если uid не известен)
+# Функция для генерации уникального ключа на основе full_name и class
 def generate_key(full_name, class_name):
     hash_input = f"{full_name.lower()}_{class_name.lower()}"
     return hashlib.md5(hash_input.encode()).hexdigest()
@@ -512,55 +512,40 @@ def handle_admin_list_page(call):
 def admin_add_start(call):
     if not is_admin(call.from_user.id):
         return
-    msg = bot.send_message(call.message.chat.id, "Введи Telegram ID ученика (число, или пусто для авто-генерации):")
-    bot.register_next_step_handler(msg, admin_add_id)
+    msg = bot.send_message(call.message.chat.id, "Введи ФИО:")
+    bot.register_next_step_handler(msg, admin_add_name)
 
-def admin_add_id(message):
-    uid_input = message.text.strip()
-    if uid_input:
-        try:
-            uid = str(int(uid_input))
-        except ValueError:
-            bot.send_message(message.chat.id, "Неверный ID. Попробуй заново.")
-            msg = bot.send_message(message.chat.id, "Введи Telegram ID ученика (число, или пусто для авто-генерации):")
-            bot.register_next_step_handler(msg, admin_add_id)
-            return
-    else:
-        uid = generate_key(str(len(db)), datetime.now().strftime("%Y%m%d"))  # Авто-uid
-    
-    if uid in db:
-        bot.send_message(message.chat.id, "Этот ID уже есть. Используй редактирование.")
-        return
-    db[uid] = {'opinions': []}
-    msg = bot.send_message(message.chat.id, "Введи ФИО:")
-    bot.register_next_step_handler(msg, admin_add_name, uid)
-
-def admin_add_name(message, uid):
-    text = message.text.strip()
-    if not text:
+def admin_add_name(message):
+    full_name = message.text.strip()
+    if not full_name:
         bot.send_message(message.chat.id, "ФИО не может быть пустым. Попробуй заново.")
         msg = bot.send_message(message.chat.id, "Введи ФИО:")
-        bot.register_next_step_handler(msg, admin_add_name, uid)
+        bot.register_next_step_handler(msg, admin_add_name)
         return
-    db[uid]['full_name'] = text
     msg = bot.send_message(message.chat.id, "Введи класс (10А):")
-    bot.register_next_step_handler(msg, admin_add_class, uid)
+    bot.register_next_step_handler(msg, admin_add_class, full_name)
 
-def admin_add_class(message, uid):
-    text = message.text.strip()
-    if not text:
+def admin_add_class(message, full_name):
+    class_name = message.text.strip()
+    if not class_name:
         bot.send_message(message.chat.id, "Класс не может быть пустым. Попробуй заново.")
         msg = bot.send_message(message.chat.id, "Введи класс (10А):")
-        bot.register_next_step_handler(msg, admin_add_class, uid)
+        bot.register_next_step_handler(msg, admin_add_class, full_name)
         return
-    db[uid]['class'] = text
+    uid = generate_key(full_name, class_name)
+    if uid in db:
+        bot.send_message(message.chat.id, "Этот ученик уже существует. Используй редактирование.")
+        return
+    db[uid] = {
+        'full_name': full_name,
+        'class': class_name,
+        'opinions': []
+    }
     msg = bot.send_message(message.chat.id, "Введи ДР (15.03.2008):")
     bot.register_next_step_handler(msg, admin_add_birthday, uid)
 
 def admin_add_birthday(message, uid):
-    text = message.text.strip()
-    # Можно добавить валидацию формата даты, но для простоты пропустим
-    db[uid]['birthday'] = text
+    db[uid]['birthday'] = message.text.strip()
     msg = bot.send_message(message.chat.id, "Введи телефон (или пусто):")
     bot.register_next_step_handler(msg, admin_add_phone, uid)
 
@@ -654,6 +639,17 @@ def admin_edit_save(message, uid, field):
         msg = bot.send_message(message.chat.id, f"Новое значение для {field} (текущее: {db[uid].get(field, 'пусто')}):")
         bot.register_next_step_handler(msg, admin_edit_save, uid, field)
         return
+    # Если меняем full_name или class, нужно проверить на дубликат с новым ключом
+    if field in ['full_name', 'class']:
+        new_full_name = text if field == 'full_name' else db[uid]['full_name']
+        new_class = text if field == 'class' else db[uid]['class']
+        new_uid = generate_key(new_full_name, new_class)
+        if new_uid != uid and new_uid in db:
+            bot.send_message(message.chat.id, "Ученик с таким ФИО и классом уже существует.")
+            return
+        # Если ок, обновляем и меняем ключ если нужно
+        db[new_uid] = db.pop(uid)
+        uid = new_uid
     db[uid][field] = text
     save_db(db)
     bot.send_message(message.chat.id, f"Обновлено {field} для {db[uid]['full_name']}.")
