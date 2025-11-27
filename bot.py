@@ -1,3 +1,4 @@
+
 import telebot
 import json
 import os
@@ -522,14 +523,14 @@ def admin_add_name(message):
         msg = bot.send_message(message.chat.id, "Введи ФИО:")
         bot.register_next_step_handler(msg, admin_add_name)
         return
-    msg = bot.send_message(message.chat.id, "Введи класс (10А):")
+    msg = bot.send_message(message.chat.id, "Введи класс:")
     bot.register_next_step_handler(msg, admin_add_class, full_name)
 
 def admin_add_class(message, full_name):
     class_name = message.text.strip()
     if not class_name:
         bot.send_message(message.chat.id, "Класс не может быть пустым. Попробуй заново.")
-        msg = bot.send_message(message.chat.id, "Введи класс (10А):")
+        msg = bot.send_message(message.chat.id, "Введи класс:")
         bot.register_next_step_handler(msg, admin_add_class, full_name)
         return
     uid = generate_key(full_name, class_name)
@@ -541,7 +542,7 @@ def admin_add_class(message, full_name):
         'class': class_name,
         'opinions': []
     }
-    msg = bot.send_message(message.chat.id, "Введи ДР (15.03.2008):")
+    msg = bot.send_message(message.chat.id, "Введи ДР:")
     bot.register_next_step_handler(msg, admin_add_birthday, uid)
 
 def admin_add_birthday(message, uid):
