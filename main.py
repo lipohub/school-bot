@@ -1,19 +1,15 @@
 # main.py
 import telebot
 from config import BOT_TOKEN
-import handlers
+from database import load_db, save_db
+from handlers import register_all_handlers
 
-# Подключаем реальный бот и базу
-handlers.bot = telebot.TeleBot(BOT_TOKEN)
-handlers.db = handlers.load_db()  # загрузили базу
+bot = telebot.TeleBot(BOT_TOKEN)
+db = load_db()
 
-# Функция для обновления базы при изменениях
-def refresh_db():
-    handlers.db = handlers.load_db()
-
-handlers.refresh_db = refresh_db
-handlers.save_db = handlers.save_db
+# Регистрируем ВСЕ хендлеры одним вызовом
+register_all_handlers(bot)
 
 if __name__ == '__main__':
-    print("Бот запущен!")
-    handlers.bot.infinity_polling()
+    print("Бот запущен! Структура — огонь!")
+    bot.infinity_polling()
