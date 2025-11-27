@@ -4,8 +4,8 @@ import hashlib
 from config import MONGO_URI
 
 client = pymongo.MongoClient(MONGO_URI)
-db = client['telegram_bot_db']
-collection = db['students']
+mongo_db = client['telegram_bot_db']
+collection = mongo_db['students']
 
 def load_db():
     doc = collection.find_one({'_id': 'students'})
@@ -18,5 +18,6 @@ def save_db(data):
         upsert=True
     )
 
-def generate_key(name, class_name):
-    return hashlib.md5(f"{name.lower()}_{class_name.lower()}".encode()).hexdigest()
+def generate_key(full_name: str, class_name: str) -> str:
+    key = f"{full_name.lower()}_{class_name.lower()}"
+    return hashlib.md5(key.encode()).hexdigest()
