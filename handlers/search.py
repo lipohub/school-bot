@@ -1,4 +1,7 @@
 # handlers/search.py
+from telebot import types
+from utils import encode_query, decode_query
+
 def register_handlers(bot):
     @bot.message_handler(commands=['search'])
     def search_command(message):
@@ -11,78 +14,60 @@ def register_handlers(bot):
         bot.register_next_step_handler(msg, process_search)
 
     def process_search(message):
-        query = message.text.lower().strip()
+        query = message.text.lower().strip() if message.text else ""
         if not query:
-            bot.send_message(message.chat.id, "Запрос пустой 😔", reply_markup=main_menu())
+            bot.send_message(message.chat.id, "Запрос пустой", reply_markup=bot.utils.main_menu())
             return
 
         results = []
-        for uid, data in db.items():
+        for uid, data in bot.db.items():
             if not data.get('approved', False):
                 continue
-            if query in data['full_name'].lower() or query in data.get('class', '').lower():
+            fullname = data['full_name'].lower()
+            cls = data.get('class', '').lower()
+            if query in fullname or query in cls:
                 results.append((uid, data))
 
         if not results:
-            bot.send_message(message.chat.id, "Ничего не нашёл 😔", reply_markup=main_menu())
+            bot.send_message(message.chat.id, "Ничего не нашёл", reply_markup=bot.utils.main_menu())
             return
 
-        results = sorted(results, key=lambda x: x[1]['full_name'])
+        results.sort(key=lambda x: x[1]['full_name'])
+        show_page(message.chat.id, query, 1, results)
 
+    def show_page(chat_id, query, page, results):
         per_page = 10
-        total_pages = (len(results) + per_page - 1) // per_page
-
-        show_search_page(message.chat.id, query, 1, results, total_pages, message_id=None)
-
-    def show_search_page(chat_id, query, page, results, total_pages, message_id=None):
-        per_page = 10
-        start = (page - 1) * per_page
-        end = start + per_page
-        current_results = results[start:end]
+        total = (len(results) + per_page - 1) // per_page
+        start = (page-1) * per_page
+        chunk = results[start:start+per_page]
 
         kb = types.InlineKeyboardMarkup(row_width=1)
-        for uid, data in current_results:
-            kb.add(types.InlineKeyboardButton(
-                f"{data['full_name']} • {data['class']}",
-                callback_data=f"profile_{uid}"
-            ))
+        for uid, data in chunk:
+            kb.add(types.InlineKeyboardButton(f"{data['full_name']} • {data['class']}", callback_data=f"profile_{uid}"))
 
-        row = []
-        encoded_query = encode_query(query)
+        nav = []
+        enc = encode_query(query)
         if page > 1:
-            row.append(types.InlineKeyboardButton("◀️ Prev", callback_data=f"search_page_{encoded_query}_{page-1}"))
-        if page < total_pages:
-            row.append(types.InlineKeyboardButton("Next ▶️", callback_data=f"search_page_{encoded_query}_{page+1}"))
-        if row:
-            kb.row(*row)
+            nav.append(types.InlineKeyboardButton("◀️", callback_data=f"sp_{enc}_{page-1}"))
+        if page < total:
+            nav.append(types.InlineKeyboardButton("▶️", callback_data=f"sp_{enc}_{page+1}"))
+        if nav: kb.row(*nav)
 
-        text = f"Выбери человека для '{query}' (страница {page}/{total_pages}):"
+        text = f"Результаты по «{query}» ({page}/{total}):"
+        bot.send_message(chat_id, text, reply_markup=kb)
 
-        if message_id:
-            bot.edit_message_text(text, chat_id, message_id, reply_markup=kb)
-        else:
-            bot.send_message(chat_id, text, reply_markup=kb)
-
-    @bot.callback_query_handler(func=lambda c: c.data.startswith('search_page_'))
-    def handle_search_page(call):
-        parts = call.data.split('_')
-        encoded_query = parts[2]
-        page = int(parts[3])
-        query = decode_query(encoded_query)
+    @bot.callback_query_handler(func=lambda c: c.data.startswith('sp_'))
+    def pagination(call):
+        _, enc, page = call.data.split('_')
+        query = decode_query(enc)
+        page = int(page)
 
         results = []
-        for uid, data in db.items():
-            if not data.get('approved', False):
-                continue
+        for uid, data in bot.db.items():
+            if not data.get('approved', False): continue
             if query in data['full_name'].lower() or query in data.get('class', '').lower():
                 results.append((uid, data))
+        results.sort(key=lambda x: x[1]['full_name'])
 
-        results = sorted(results, key=lambda x: x[1]['full_name'])
-
-        total_pages = (len(results) + 10 - 1) // 10
-
-        if page < 1 or page > total_pages:
-            bot.answer_callback_query(call.id, "Неверная страница")
-            return
-
-        show_search_page(call.message.chat.id, query, page, results, total_pages, call.message.message_id)
+        show_page(call.message.chat.id, query, page, results)
+        bot.answer_callback_query(call.id)
