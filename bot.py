@@ -10,21 +10,40 @@ import pymongo
 # ========================= НАСТРОЙКИ =========================
 BOT_TOKEN = '8483130885:AAEBgryQXbUnNUuS22ZJeUdQVOo4Jua6Vx0'          # ← замени
 ADMIN_IDS = [1967855685]                   # ← твои Telegram ID (можно несколько через запятую)
-MONGO_URI = os.getenv('mongodb+srv://Botuser:<kirkram43211020K!>@cluster0.xwuatb1.mongodb.net/?appName=Cluster0')         # Установи в переменных окружения
+MONGO_URI = os.getenv('MONGO_URI')         # Строка подключения из переменных окружения
 
-client = pymongo.MongoClient(MONGO_URI)
-mongo_db = client['telegram_bot_db']       # Название твоей базы данных
-collection = mongo_db['students']          # Коллекция для хранения данных
+# Проверка переменной MONGO_URI
+if MONGO_URI is None:
+    raise ValueError("MONGO_URI не установлена! Добавь её в Environment Variables на Render.")
+
+# Подключение к MongoDB
+try:
+    client = pymongo.MongoClient(MONGO_URI)
+    mongo_db = client['telegram_bot_db']       # Название БД (можно изменить)
+    collection = mongo_db['students']          # Название коллекции
+    # Тест подключения
+    client.admin.command('ping')
+    print("Подключение к MongoDB успешно!")
+except Exception as e:
+    raise Exception(f"Ошибка подключения к MongoDB: {e}")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ========================= БАЗА ДАННЫХ =========================
 def load_db():
-    doc = collection.find_one({'_id': 'students'})
-    return doc['data'] if doc else {}
+    try:
+        doc = collection.find_one({'_id': 'students'})
+        return doc['data'] if doc else {}
+    except Exception as e:
+        print(f"Ошибка загрузки БД: {e}")
+        return {}
 
 def save_db(db_data):
-    collection.update_one({'_id': 'students'}, {'$set': {'data': db_data}}, upsert=True)
+    try:
+        collection.update_one({'_id': 'students'}, {'$set': {'data': db_data}}, upsert=True)
+        print("БД сохранена успешно!")
+    except Exception as e:
+        print(f"Ошибка сохранения БД: {e}")
 
 db = load_db()
 
