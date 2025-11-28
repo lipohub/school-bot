@@ -1,4 +1,3 @@
-# utils.py
 from telebot import types
 import base64
 
