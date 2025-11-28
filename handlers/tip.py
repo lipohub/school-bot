@@ -1,46 +1,60 @@
 from telebot import types
-from datetime import datetime
 from database import generate_key
+import re
+
+def parse_tip(text):
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    if len(lines) < 2:
+        return None
+    
+    parsed = {
+        'full_name': lines[0],
+        'class': lines[1],
+        'birthday': lines[2] if len(lines) > 2 else '',
+        'phone': lines[3] if len(lines) > 3 else '',
+        'tg': lines[4] if len(lines) > 4 else '',
+        'vk': lines[5] if len(lines) > 5 else '',
+        'interests': lines[6] if len(lines) > 6 else '',
+        'description': '\n'.join(lines[7:]) if len(lines) > 7 else ''
+    }
+    return parsed
 
 def register_handlers(bot):
     @bot.message_handler(commands=['add_tip'])
     def add_tip(message):
-        bot.send_message(message.chat.id, "Отправь наводку:", reply_markup=types.ReplyKeyboardRemove())
+        bot.send_message(message.chat.id, 
+                        "Отправьте информацию об ученике одним сообщением в следующем формате:\n\n"
+                        "Иванов Иван Иванович\n"
+                        "10А\n"
+                        "01.01.2005\n"
+                        "8 999 123 45 67\n"
+                        "@username\n"
+                        "vk.com/username\n"
+                        "Программирование, математика\n"
+                        "Описание интересов и характеристик")
         bot.register_next_step_handler(message, process_tip)
 
     def process_tip(message):
-        parsed = parse_tip(message.text)
-        if parsed:
-            uid = generate_key(parsed['full_name'], parsed['class'])
-            bot.db[uid] = parsed
-            bot.db[uid]['approved'] = False
-            bot.database.save_db(bot.db)
-            bot.send_message(message.chat.id, "Наводка сохранена и ожидает одобрения!")
-        else:
-            bot.send_message(message.chat.id, "Ошибка парсинга. Попробуй заново.")
-
-#grok:render type="render_inline_citation"
-<argument name="citation_id">1</argument>
-</grok:render> 
-
-### handlers/search.py
-```python
-from telebot import types
-from utils import encode_query, decode_query
-
-def register_handlers(bot):
-    @bot.message_handler(commands=['search'])
-    def search(message):
-        bot.send_message(message.chat.id, "Введи запрос для поиска:")
-        bot.register_next_step_handler(message, process_search)
-
-    def process_search(message):
-        query = message.text.strip().lower()
-        if not query:
-            bot.send_message(message.chat.id, "Запрос пустой.")
+        if not message.text:
+            bot.send_message(message.chat.id, "Сообщение не может быть пустым. Попробуйте снова.")
+            bot.register_next_step_handler(message, process_tip)
             return
-        results = [ (uid, data) for uid, data in bot.db.items() if data.get('approved') and (query in data['full_name'].lower() or query in data['class'].lower()) ]
-        if not results:
-            bot.send_message(message.chat.id, "Ничего не найдено.")
+
+        parsed_data = parse_tip(message.text)
+        if not parsed_data:
+            bot.send_message(message.chat.id, 
+                           "Ошибка в формате сообщения. Убедитесь, что вы отправили информацию в правильном формате.")
+            bot.register_next_step_handler(message, process_tip)
             return
-        show_search_page(message.chat.id, query, 1, results)
+
+        uid = generate_key(parsed_data['full_name'], parsed_data['class'])
+        
+        # Создаем запись с данными
+        bot.db[uid] = parsed_data
+        bot.db[uid]['approved'] = False  # Новые записи требуют одобрения
+        
+        # Сохраняем в базу данных
+        save_db(bot.db)
+        
+        bot.send_message(message.chat.id, 
+                        f"Информация о {parsed_data['full_name']} добавлена и отправлена на проверку администратору.")
