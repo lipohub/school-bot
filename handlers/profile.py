@@ -5,10 +5,10 @@ def register_handlers(bot):
     @bot.callback_query_handler(func=lambda c: c.data.startswith('profile_'))
     def show_profile(call):
         uid = call.data.split('_')[1]
-        bot.refresh_db()
+        bot.refresh_db()  # Обновляем данные из базы
         data = bot.db.get(uid)
 
-        if not data or not data.get('approved'):
+        if not data or not data.get('approved', False):
             bot.answer_callback_query(call.id, "Профиль не подтверждён")
             return
 
