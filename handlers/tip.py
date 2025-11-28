@@ -1,39 +1,44 @@
+# handlers/tip.py
 from telebot import types
-from datetime import datetime
 
 def register_handlers(bot):
     @bot.message_handler(commands=['add_tip'])
-    def add_tip(message):
-        bot.send_message(message.chat.id, 
-                        "Отправьте информацию об ученике одним сообщением в следующем формате:\n\n"
-                        "Иванов Иван Иванович\n"
-                        "10А\n"
-                        "01.01.2005\n"
-                        "8 999 123 45 67\n"
-                        "@username\n"
-                        "vk.com/username\n"
-                        "Программирование, математика\n"
-                        "Описание интересов и характеристик\n\n"
-                        "Можно также прикрепить фотографию.")
-        bot.register_next_step_handler(message, process_tip)
+    def add_tip_command(message):
+        msg = bot.send_message(message.chat.id,
+            "Напиши одним сообщением всё, что знаешь или хочешь исправить.\n"
+            "Формат (пример):\n\n"
+            "Иванов Иван\n10А\n15.03.2008\n+79991234567\n@ivanov_tg\nvk.com/ivanov2008\nфутбол, программирование\nОписание: Крутой парень, любит кодинг.\n\n"
+            "Можешь прикрепить фото.")
+        
+        bot.register_next_step_handler(msg, process_tip, message.from_user.id)
 
-    def process_tip(message):
-        text = message.text.strip() if message.text else ""
+    @bot.callback_query_handler(func=lambda c: c.data == 'add_tip')
+    def add_tip_start(call):
+        msg = bot.send_message(call.message.chat.id,
+            "Напиши одним сообщением всё, что знаешь или хочешь исправить.\n"
+            "Формат (пример):\n\n"
+            "Иванов Иван\n10А\n15.03.2008\n+79991234567\n@ivanov_tg\nvk.com/ivanov2008\nфутбол, программирование\nОписание: Крутой парень, любит кодинг.\n\n"
+            "Можешь прикрепить фото.")
+        
+        bot.register_next_step_handler(msg, process_tip, call.from_user.id)
+
+    def process_tip(message, user_id):
+        tip_text = message.text.strip() if message.text else ""
         photo_id = message.photo[-1].file_id if message.photo else None
         
         bot.send_message(message.chat.id, 
-            "Спасибо! Я отправил твою наводку админам на проверку.", 
+            "Спасибо! Я отправил твою наводку админам на проверку.\n"
+            "Как только проверят — информация появится в поиске.", 
             reply_markup=bot.utils.main_menu())
 
         # Формируем сообщение админам с кнопками
         kb = types.InlineKeyboardMarkup()
         kb.add(
             types.InlineKeyboardButton("Подтвердить наводку", callback_data=f"approve_tip_{message.message_id}"),
-            types.InlineKeyboardButton("Отклонить", callback_data=f"reject_tip_{message.message_id}")
-        )
+            types.InlineKeyboardButton("Отклонить", callback_data=f"reject_tip_{message.message_id}"))
         
         info = (f"Новая наводка от @{message.from_user.username} ({message.from_user.id})\n"
-                f"Сообщение ID: {message.message_id}\n\n{text}")
+                f"Сообщение ID: {message.message_id}\n\n{tip_text}")
         
         for admin in bot.config.ADMIN_IDS:
             if photo_id:
@@ -62,7 +67,7 @@ def register_handlers(bot):
             parsed_data = parse_tip(tip_text)
             if not parsed_data:
                 bot.edit_message_text("Ошибка парсинга наводки. Добавьте вручную.", 
-                                    call.message.chat.id, call.message.message_id)
+                                      call.message.chat.id, call.message.message_id)
                 return
             
             # Ищем существующий профиль по full_name и class
@@ -89,7 +94,26 @@ def register_handlers(bot):
             bot.save_db(bot.db)
             
             bot.edit_message_text(f"Наводка {action} админом @{call.from_user.username}. Профиль {'обновлен' if existing_uid else 'добавлен'}.", 
-                                call.message.chat.id, call.message.message_id)
+                                  call.message.chat.id, call.message.message_id)
         else:
             bot.edit_message_text(f"Наводка {action} админом @{call.from_user.username}", 
-                                call.message.chat.id, call.message.message_id)
+                                  call.message.chat.id, call.message.message_id)
+
+def parse_tip(tip_text):
+    lines = tip_text.split('\n')
+    if len(lines) < 2:
+        return None
+    data = {
+        'full_name': lines[0].strip(),
+        'class': lines[1].strip(),
+        'birthday': lines[2].strip() if len(lines) > 2 else '',
+        'phone': lines[3].strip() if len(lines) > 3 else '',
+        'tg': lines[4].strip() if len(lines) > 4 else '',
+        'vk': lines[5].strip() if len(lines) > 5 else '',
+        'interests': lines[6].strip() if len(lines) > 6 else '',
+        'description': '\n'.join(lines[7:]).strip() if len(lines) > 7 else ''
+    }
+    # Базовая валидация
+    if not data['full_name'] or not data['class']:
+        return None
+    return data
