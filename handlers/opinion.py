@@ -1,3 +1,4 @@
+
 # handlers/opinion.py
 from telebot import types
 from datetime import datetime
@@ -7,14 +8,20 @@ def register_handlers(bot):
     def add_opinion(call):
         uid = call.data.split('_')[2]
         msg = bot.send_message(call.message.chat.id, "Напиши мнение (до 200 символов):")
-        bot.register_next_step_handler(msg, save_opinion, uid)
+        bot.register_next_step_handler(msg, save_opinion, uid, call.message.chat.id)
 
-    def save_opinion(message, uid):
+    def save_opinion(message, uid, chat_id):
         text = message.text.strip()
         if len(text) > 200:
-            bot.send_message(message.chat.id, "Слишком длинно!")
+            bot.send_message(message.chat.id, "Слишком длинно! Мнение не может превышать 200 символов.")
             return
-        if 'opinions'] = bot.db.setdefault(uid, {}).setdefault('opinions', [])
+        
+        # Исправлена синтаксическая ошибка
+        if uid not in bot.db:
+            bot.db[uid] = {}
+        if 'opinions' not in bot.db[uid]:
+            bot.db[uid]['opinions'] = []
+        
         bot.db[uid]['opinions'].append({
             'text': text,
             'author_id': str(message.from_user.id),
@@ -22,5 +29,6 @@ def register_handlers(bot):
             'date': datetime.now().strftime("%d.%m.%Y"),
             'approved': False
         })
-        bot.save_db(bot.db)
-        bot.send_message(message.chat.id, "Мнение отправлено на модерацию!")
+        
+        save_db(bot.db)  # Используем функцию из database
+        bot.send_message(chat_id, "Мнение отправлено на модерацию!")
