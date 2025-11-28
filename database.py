@@ -1,4 +1,3 @@
-# database.py
 import pymongo
 from config import MONGO_URI
 
@@ -16,5 +15,3 @@ def save_db(data):
 def generate_key(full_name, class_name):
     hash_input = f"{full_name.lower()}_{class_name.lower()}"
     return hashlib.md5(hash_input.encode()).hexdigest()
-
-db = load_db()
