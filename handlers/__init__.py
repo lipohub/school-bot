@@ -1,4 +1,3 @@
-# handlers/__init__.py
 from .start import register_handlers as reg_start
 from .search import register_handlers as reg_search
 from .profile import register_handlers as reg_profile
