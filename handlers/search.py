@@ -1,4 +1,8 @@
+
 # handlers/search.py
+from telebot import types
+from utils import encode_query, decode_query
+
 def register_handlers(bot):
     @bot.message_handler(commands=['search'])
     def search_command(message):
@@ -48,7 +52,7 @@ def register_handlers(bot):
             ))
 
         row = []
-        encoded_query = base64.b64encode(query.encode()).decode('utf-8')
+        encoded_query = bot.utils.encode_query(query)
         if page > 1:
             row.append(types.InlineKeyboardButton("◀️ Prev", callback_data=f"search_page_{encoded_query}_{page-1}"))
         if page < total_pages:
@@ -68,7 +72,7 @@ def register_handlers(bot):
         parts = call.data.split('_')
         encoded_query = parts[2]
         page = int(parts[3])
-        query = base64.b64decode(encoded_query).decode('utf-8')
+        query = bot.utils.decode_query(encoded_query)
 
         results = []
         for uid, data in bot.db.items():
