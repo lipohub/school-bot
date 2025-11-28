@@ -1,5 +1,6 @@
 # database.py
 import pymongo
+from config import MONGO_URI
 
 client = pymongo.MongoClient(MONGO_URI)
 mongo_db = client['telegram_bot_db']
@@ -9,9 +10,11 @@ def load_db():
     doc = collection.find_one({'_id': 'students'})
     return doc['data'] if doc else {}
 
-def save_db(db):
-    collection.update_one({'_id': 'students'}, {'$set': {'data': db}}, upsert=True)
+def save_db(data):
+    collection.update_one({'_id': 'students'}, {'$set': {'data': data}}, upsert=True)
 
 def generate_key(full_name, class_name):
     hash_input = f"{full_name.lower()}_{class_name.lower()}"
     return hashlib.md5(hash_input.encode()).hexdigest()
+
+db = load_db()
