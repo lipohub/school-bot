@@ -1,4 +1,3 @@
-# database.py
 import pymongo
 import hashlib
 from config import MONGO_URI
