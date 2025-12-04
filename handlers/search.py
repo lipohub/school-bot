@@ -1,7 +1,5 @@
-
-# handlers/search.py
 from telebot import types
-from utils import encode_query, decode_query
+from utils import encode_query, decode_query, main_menu
 
 def register_handlers(bot):
     @bot.message_handler(commands=['search'])
@@ -17,7 +15,7 @@ def register_handlers(bot):
     def process_search(message):
         query = message.text.lower().strip()
         if not query:
-            bot.send_message(message.chat.id, "Запрос пустой 😔", reply_markup=bot.utils.main_menu())
+            bot.send_message(message.chat.id, "Запрос пустой 😔", reply_markup=main_menu())
             return
 
         results = []
@@ -28,7 +26,7 @@ def register_handlers(bot):
                 results.append((uid, data))
 
         if not results:
-            bot.send_message(message.chat.id, "Ничего не нашёл 😔", reply_markup=bot.utils.main_menu())
+            bot.send_message(message.chat.id, "Ничего не нашёл 😔", reply_markup=main_menu())
             return
 
         results = sorted(results, key=lambda x: x[1]['full_name'])
@@ -52,7 +50,7 @@ def register_handlers(bot):
             ))
 
         row = []
-        encoded_query = bot.utils.encode_query(query)
+        encoded_query = encode_query(query)
         if page > 1:
             row.append(types.InlineKeyboardButton("◀️ Prev", callback_data=f"search_page_{encoded_query}_{page-1}"))
         if page < total_pages:
@@ -72,7 +70,7 @@ def register_handlers(bot):
         parts = call.data.split('_')
         encoded_query = parts[2]
         page = int(parts[3])
-        query = bot.utils.decode_query(encoded_query)
+        query = decode_query(encoded_query)
 
         results = []
         for uid, data in bot.db.items():
